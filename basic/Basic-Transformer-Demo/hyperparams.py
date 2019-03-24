@@ -1,5 +1,9 @@
+#!/usr/bin/env python2.7
+# -*- coding: utf-8 -*-
 class Hyperparams:
-    '''Hyperparameters'''
+    '''
+    Hyperparameters
+    '''
     # data
     source_train = 'data/train.tags.de-en.de'
     target_train = 'data/train.tags.de-en.en'
@@ -15,7 +19,7 @@ class Hyperparams:
     maxlen = 10  # Maximum number of words in a sentence. alias = T.
     # Feel free to increase this if you are ambitious.
     min_cnt = 20  # words whose occurred less than min_cnt are encoded as <UNK>.
-    hidden_units = 512  # alias = C
+    hidden_units = 512  # alias = C, embedding size
     num_blocks = 6  # number of encoder/decoder blocks
     num_epochs = 20
     num_heads = 8

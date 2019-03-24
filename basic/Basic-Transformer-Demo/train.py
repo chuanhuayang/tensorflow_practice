@@ -1,13 +1,14 @@
+#!/usr/bin/env python2.7
+# -*- coding: utf-8 -*-
 from data_load import get_batch_data, load_de_vocab, load_en_vocab
 from hyperparams import Hyperparams as hp
 
 import tensorflow as tf
 from modules import embedding,positional_encoding, multihead_attention,feedforward,label_smoothing
-import os,codecs
 from tqdm import tqdm
 
 
-class Graph():
+class Graph(object):
     def __init__(self,is_training=True):
         self.graph = tf.Graph()
 
@@ -19,7 +20,11 @@ class Graph():
                 self.y = tf.placeholder(tf.int32,shape=(None,hp.maxlen))
 
             # define decoder inputs
-            self.decoder_inputs = tf.concat((tf.ones_like(self.y[:,:1]) * 2,self.y[:,:-1]) ,-1) # 2代表<S>，是decoder的初始输入
+            # id = 2代表<S>，是decoder的初始输入,这一步把正常的y向量做转换，比如y = [["i", "love", "china", "deeply"], ["can", "you", "speak", "chinese"]]修改为
+            # [["<s>", "i", "love", "china"], ["<s>, "can", "you", "speak"]]， 这部分将在decoder阶段，最先输入self-attention部分
+            # 在训练阶段，decoder_inputs如上，在inference阶段，由于无法获知真正的y，所以y输入的是shape=[batch_size, max_length]的全0向量。
+            # 处理之后旧变成[["<s>", 0, 0, 0]]这样子，每次值取第一个预测结果，循环输入再取前两个结果
+            self.decoder_inputs = tf.concat((tf.ones_like(self.y[:,:1]) * 2, self.y[:,:-1]) ,-1)
 
             de2idx,idx2de = load_de_vocab()
             en2idx,idx2en = load_en_vocab()
@@ -29,7 +34,7 @@ class Graph():
                 self.enc = embedding(self.x,
                                      vocab_size=len(de2idx),
                                      num_units = hp.hidden_units,
-                                     zero_pad=True, # 让padding一直是0
+                                     zero_pad=True, # id为0的行表示padding的embedding, true表示将这一行置0（随机初始化出来的可能不是0）
                                      scale=True,
                                      scope="enc_embed")
 
@@ -49,11 +54,11 @@ class Graph():
                                           scale = False,
                                           scope = "enc_pe")
 
-                ##Drop out
+                ## Dropout
                 self.enc = tf.layers.dropout(self.enc,rate = hp.dropout_rate,
                                              training = tf.convert_to_tensor(is_training))
 
-                ## Blocks
+                ## Blocks, 叠加block，6个
                 for i in range(hp.num_blocks):
                     with tf.variable_scope("num_blocks_{}".format(i)):
                         ### MultiHead Attention
@@ -77,10 +82,9 @@ class Graph():
                                      scale=True,
                                      scope="dec_embed")
 
-                ## Positional Encoding
+                # Positional Encoding
                 if hp.sinusoid:
                     self.dec += positional_encoding(self.decoder_inputs,
-                                                    vocab_size = hp.maxlen,
                                                     num_units = hp.hidden_units,
                                                     zero_pad = False,
                                                     scale = False,
@@ -99,7 +103,7 @@ class Graph():
                                             rate = hp.dropout_rate,
                                             training = tf.convert_to_tensor(is_training))
 
-                ## Blocks
+                # Blocks
                 for i in range(hp.num_blocks):
                     with tf.variable_scope("num_blocks_{}".format(i)):
                         ## Multihead Attention ( self-attention)
@@ -125,7 +129,7 @@ class Graph():
                         ## Feed Forward
                         self.dec = feedforward(self.dec, num_units=[4 * hp.hidden_units, hp.hidden_units])
 
-            # Final linear projection
+            # Final linear projection, 分类任务，分类数量是词表长度
             self.logits = tf.layers.dense(self.dec,len(en2idx))
             self.preds = tf.to_int32(tf.argmax(self.logits,dimension=-1))
             self.istarget = tf.to_float(tf.not_equal(self.y,0))

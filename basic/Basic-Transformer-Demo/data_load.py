@@ -1,3 +1,5 @@
+#!/usr/bin/env python2.7
+# -*- coding: utf-8 -*-
 from hyperparams import Hyperparams as hp
 import tensorflow as tf
 import numpy as np
@@ -31,13 +33,14 @@ def create_data(source_sents,target_sents):
         x = [de2idx.get(word,1) for word in (source_sent+u" </S>").split()] # 1: OOV, </S>: End of Text
         y = [en2idx.get(word,1) for word in (target_sent+u" </S>").split()]
 
+        # 过长的语料过滤掉
         if max(len(x),len(y)) <= hp.maxlen:
             x_list.append(np.array(x))
             y_list.append(np.array(y))
             Sources.append(source_sent)
             Targets.append(target_sent)
 
-    #Pad
+    # Pad
     X = np.zeros([len(x_list),hp.maxlen],np.int32)
     Y = np.zeros([len(y_list),hp.maxlen],np.int32)
 

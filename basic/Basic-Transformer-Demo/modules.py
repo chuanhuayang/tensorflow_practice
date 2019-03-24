@@ -1,3 +1,5 @@
+#!/usr/bin/env python2.7
+# -*- coding: utf-8 -*-
 import tensorflow as tf
 import numpy as np
 
@@ -28,7 +30,7 @@ def embedding(inputs,
       A `Tensor` with one more rank than inputs's. The last dimensionality
         should be `num_units`.
 
-    For example,
+    For example, if zero_pad = True, the first line(embedding of padding token) is all zeros value
 
     ```
     import tensorflow as tf
@@ -71,6 +73,7 @@ def embedding(inputs,
                                        dtype=tf.float32,
                                        shape=[vocab_size, num_units],
                                        initializer=tf.contrib.layers.xavier_initializer())
+        # 初始化padding token的embedding 为全0
         if zero_pad:
             lookup_table = tf.concat((tf.zeros(shape=[1, num_units]),
                                       lookup_table[1:, :]), 0)
@@ -78,7 +81,6 @@ def embedding(inputs,
 
         if scale:
             outputs = outputs * (num_units ** 0.5)
-
     return outputs
 
 
@@ -96,23 +98,26 @@ def positional_encoding(inputs,
       zero_pad: Boolean. If True, all the values of the first row (id = 0) should be constant zero
       scale: Boolean. If True, the output will be multiplied by sqrt num_units(check details from paper)
       scope: Optional scope for `variable_scope`.
-      reuse: Boolean, whether to reuse the weights of a previous layer
-        by the same name.
+      reuse: Boolean, whether to reuse the weights of a previous layer by the same name.
 
     Returns:
         A 'Tensor' with one more rank than inputs's, with the dimensionality should be 'num_units'
     '''
 
+    # convert shape to list
     N,T = inputs.get_shape().as_list()
-    with tf.variable_scope(scope,reuse=True):
+    with tf.variable_scope(scope,reuse=reuse):
+        ## position index, shape is [N, T]
         position_ind = tf.tile(tf.expand_dims(tf.range(T),0),[N,1])
 
+        ## pos / 10000^(2*i/num_unit), i=0,....num_units - 1, shape = [N, T, num_units]
         position_enc = np.array([
             [pos / np.power(10000, 2.*i / num_units) for i in range(num_units)]
             for pos in range(T)])
-
+        ## 偶数位置sin， 奇数位置cos编码
         position_enc[:,0::2] = np.sin(position_enc[:,0::2]) # dim 2i
         position_enc[:,1::2] = np.cos(position_enc[:,1::2]) # dim 2i+1
+
 
         lookup_table = tf.convert_to_tensor(position_enc)
 
@@ -161,15 +166,20 @@ def multihead_attention(queries,keys,num_units=None,
         V = tf.layers.dense(keys,num_units,activation=tf.nn.relu) #
 
         # Split and Concat
-        Q_ = tf.concat(tf.split(Q,num_heads,axis=2),axis=0) #
+        Q_ = tf.concat(tf.split(Q,num_heads,axis=2),axis=0)
         K_ = tf.concat(tf.split(K,num_heads,axis=2),axis=0)
         V_ = tf.concat(tf.split(V,num_heads,axis=2),axis=0)
 
+        # 这一步是计算了中的每一个token，和key中的每一个token计算相似度，计算方法是两个向量的点乘
+        # 计算完之后，要除/sqrt(64), 其中64是通过词向量=512维，分成8头得到的。这一步计算完之后，得到q1对,k1,k2...kn的值，q2对k1, k2...kn的值
+        # 下一步，应该是softmax(q1k1, q1k2...q1kn)，计算出每个词对于q1的权重，q2,...qn类似。
         outputs = tf.matmul(Q_,tf.transpose(K_,[0,2,1]))
         outputs = outputs / (K_.get_shape().as_list()[-1] ** 0.5)
 
         # 这里是对填充的部分进行一个mask，这些位置的attention score变为极小，我们的embedding操作中是有一个padding操作的，
         # 填充的部分其embedding都是0，加起来也是0，我们就会填充一个很小的数。
+        # 之所以要填充一个极小数，是为了使padding部分对应的key，和padding对应的query，乘后权值为0,
+        # 因为softmax输入为0时输出为0.5,所以必须填充很小的值才能实现。
         key_masks = tf.sign(tf.abs(tf.reduce_sum(keys,axis=-1)))
         key_masks = tf.tile(key_masks,[num_heads,1])
         key_masks = tf.tile(tf.expand_dims(key_masks,1),[1,tf.shape(queries)[1],1])
@@ -232,9 +242,11 @@ def normalize(inputs,
     '''
     with tf.variable_scope(scope, reuse=reuse):
         inputs_shape = inputs.get_shape()
+        ## [-1:]不同与[-1]，[-1:]  不会降维
         params_shape = inputs_shape[-1:]
 
         mean, variance = tf.nn.moments(inputs, [-1], keep_dims=True)
+        ## 维度等于输出单元的个数， 每个神经元享有一个beta和gamma参数， 整理相当于在输出和下一层输入之间有一个normalize层
         beta = tf.Variable(tf.zeros(params_shape))
         gamma = tf.Variable(tf.ones(params_shape))
         normalized = (inputs - mean) / ((variance + epsilon) ** (.5))
